@@ -40,11 +40,9 @@ You're reading it!
 
 ####1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
 
-The code for this step is contained in the first code cell of the IPython notebook located in "./examples/example.ipynb" (or in lines # through # of the file called `some_file.py`).  
+`lane_detection.py - l32 - calibrateCamera()`
 
-I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection.  
-
-I then used the output `objpoints` and `imgpoints` to compute the camera calibration and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to the test image using the `cv2.undistort()` function and obtained this result: 
+The central idea behind calibration is to provide samples of relative differences between known points captured from various perspectives and distances so that we can calibrate the distortion caused by the lenses. The known points are encapsulated in `object_points`, which is simply the known corners of a chessboard of size (9,6). The perceived points are drawn from various images by using the function `findChessboardCorners` which returns true if it is able to find the required number of corners. With the valid set of found corners (`image_points`), we submit an equivalent set of `object_points` and derive the camera matrix and distortion coefficients. Supplying these parameters to the `cv2.undistort()` allows us to "undistort" any image captured by the same camera. For eg.
 
 ![alt text][distorted]
 ![alt text][undistorted]
@@ -52,10 +50,23 @@ I then used the output `objpoints` and `imgpoints` to compute the camera calibra
 ###Pipeline (single images)
 
 ####1. Provide an example of a distortion-corrected image.
-To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one:
+The first step to process a driving video is to undistort each of the images
 ![alt text][undistorted_road]
 ####2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines # through # in `another_file.py`).  Here's an example of my output for this step.  (note: this is not actually from one of the test images)
+
+`lane_detection.py - l138 - threshold_pipeline()`
+
+The steps to arrive at a binary thresholded image are:
+ * Convert image to HLS color space and extract channels L and S. The S channel makes lane lanes stand out and the L channel is useful to extract the "lightedness" of short markings
+ * Select pixels in these channels that pass a threshold value (75% for S and 90% for L)
+ * Detect x and y gradients and calculate corresponding magnitude and direction values for them in the thresholded channels
+ * Threshold the gradient values and use a combination:
+
+ ```python
+    grad_combined = np.logical_and(x_grad, y_grad)
+    dir_combined = np.logical_and(dir_grad, mag_grad)
+    combined = np.logical_or(grad_combined, dir_combined)
+ ```
 
 ![alt text][binary_threshold]
 
