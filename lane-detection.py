@@ -142,6 +142,12 @@ class Frame:
         warped = cv2.warpPerspective(unsigned, M, (maxx, maxy), flags=cv2.INTER_LINEAR)
         return Warped(warped, src, dst)
 
+    def apply_mask(self, mask, ratio=0.3):
+        masked = cv2.addWeighted(self.image, 1, mask, ratio, 0)
+        return Frame(masked)
+
+
+
 class Warped(Frame):
     def __init__(self, image, src, dst):
         Frame.__init__(self, image)
@@ -150,7 +156,7 @@ class Warped(Frame):
 
     def unwarp(self):
         maxy, maxx = self.image.shape[0], self.image.shape[1]
-        unsigned = np.uint8(im)
+        unsigned = np.uint8(self.image)
         Minv = cv2.getPerspectiveTransform(self.dst, self.src)
         unwarped = cv2.warpPerspective(unsigned, Minv, (maxx, maxy), flags=cv2.INTER_LINEAR)
         return Frame(unwarped)
@@ -171,7 +177,7 @@ class Warped(Frame):
         left_fit = np.polyfit(lyp, lxp, 2)
         right_fit = np.polyfit(ryp, rxp, 2)
 
-        return Fit(out_img, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom)
+        return Fit(self, out_img, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom)
 
     def search_around_fit(self, fit, margin=50):
         im = self.image
@@ -185,13 +191,15 @@ class Warped(Frame):
         nlfit = np.polyfit(nzy[lcond], nzx[lcond], 2)
         nrfit = np.polyfit(nzy[rcond], nzx[rcond], 2)
         lx, ly, rx, ry = nzx[lcond], nzy[lcond], nzx[rcond], nzy[rcond]
-        return Fit(self.image, nlfit, nrfit, lx, ly, rx, ry, None, None)
+
+        return Fit(self, None, nlfit, nrfit, lx, ly, rx, ry, [], [])
 
 
-class Fit(Frame):
+class Fit(Warped):
 
-    def __init__(self, image, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom):
-        Frame.__init__(self, image)
+    def __init__(self, warped, slide_image, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom):
+        Warped.__init__(self, warped.image, warped.src, warped.dst)
+        self.slide_image = slide_image
         self.left_fit = left_fit
         self.right_fit = right_fit
         self.lxp = lxp
@@ -200,6 +208,52 @@ class Fit(Frame):
         self.ryp = ryp
         self.left_bottom = left_bottom
         self.right_bottom = right_bottom
+
+    def mask(self):
+        im = np.dstack((self.image, self.image, self.image))
+        h, w = im.shape[0], im.shape[1]
+        y_values = np.arange(h)
+        coeff = np.array([[y ** 2, y, 1] for y in y_values])
+        lx_values = np.dot(self.left_fit, coeff.T)
+        rx_values = np.dot(self.right_fit, coeff.T)
+
+        color_warp = np.zeros_like(im).astype(np.uint8)
+
+        # Recast the x and y points into usable format for cv2.fillPoly()
+        pts_left = np.array([np.transpose(np.vstack([lx_values, y_values]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([rx_values, y_values])))])
+        pts = np.hstack((pts_left, pts_right))
+
+        # Draw the lane onto the warped blank image
+        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+
+        # Warp the blank back to original image space using inverse perspective matrix (Minv)
+        return Warped(color_warp, self.src, self.dst)
+
+
+    def plot(self):
+        out_img = np.dstack((self.image, self.image, self.image)) * 255
+        h, w = out_img.shape[0], out_img.shape[1]
+        y_values = np.arange(h)
+        coeff = np.array([[y ** 2, y, 1] for y in y_values])
+        lx_values = np.dot(self.left_fit, coeff.T)
+        rx_values = np.dot(self.right_fit, coeff.T)
+
+        window_img = np.zeros_like(out_img)
+        l1points = np.vstack((lx_values - 50, y_values)).T.astype(np.int32)
+        l2points = np.vstack((lx_values + 50, y_values)).T.astype(np.int32)
+        r1points = np.vstack((rx_values - 50, y_values)).T.astype(np.int32)
+        r2points = np.vstack((rx_values + 50, y_values)).T.astype(np.int32)
+        lpoints = np.vstack((l1points, np.flipud(l2points)))
+        rpoints = np.vstack((r1points, np.flipud(r2points)))
+        cv2.fillPoly(window_img, [lpoints], (0, 255, 0))
+        cv2.fillPoly(window_img, [rpoints], (0, 255, 0))
+        result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
+
+        for x,y in zip(lx_values, y_values): cv2.circle(result, (int(x),int(y)), 5, (255,0,0), 10)
+        for x,y in zip(rx_values, y_values): cv2.circle(result, (int(x),int(y)), 5, (0,0,255), 10)
+
+        return result
 
 
 
@@ -233,13 +287,18 @@ test_frames = [Frame(im) for im in test_images]
 # display_images(channels, title="L & S channels", col=4, cmap='gray')
 
 # Pipeline
+final = []
 for frame in test_frames:
-    frame = frame.undistort(camera)
-    frame = frame.threshold_binary()
-    warped = frame.warp_image()
+    undistorted = frame.undistort(camera)
+    thresh = undistorted.threshold_binary()
+    warped = thresh.warp_image()
     fit = warped.search_for_fit()
-final = [fit.image for frame in test_frames]
-display_images(final, title="Final", cmap='gray')
+    mask = fit.mask().unwarp()
+    masked = frame.apply_mask(mask.image)
+    final.append(masked.image)
+
+display_images(final, title="Final")
+
 
 # # thresh_images, thresh_s, thresh_color, combined_grad = zip(*[threshold_pipeline(im) for im in test_images])
 # # display_images(thresh_color, col=3, cmap='gray', title='Combined Channels')
@@ -278,32 +337,6 @@ display_images(final, title="Final", cmap='gray')
 #     plt.show()
 #
 #
-# def plot_fit(out_img, left_fit, right_fit, color='yellow', title='Line fit'):
-#     h, w, _ = out_img.shape
-#     y_values = np.arange(h)
-#     coeff = np.array([[y ** 2, y, 1] for y in y_values])
-#     lx_values = np.dot(left_fit, coeff.T)
-#     rx_values = np.dot(right_fit, coeff.T)
-#
-#     window_img = np.zeros_like(out_img)
-#     l1points = np.vstack((lx_values - 50, y_values)).T.astype(np.int32)
-#     l2points = np.vstack((lx_values + 50, y_values)).T.astype(np.int32)
-#     r1points = np.vstack((rx_values - 50, y_values)).T.astype(np.int32)
-#     r2points = np.vstack((rx_values + 50, y_values)).T.astype(np.int32)
-#     lpoints = np.vstack((l1points, np.flipud(l2points)))
-#     rpoints = np.vstack((r1points, np.flipud(r2points)))
-#     cv2.fillPoly(window_img, [lpoints], (0, 255, 0))
-#     cv2.fillPoly(window_img, [rpoints], (0, 255, 0))
-#     result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-#
-#     plt.imshow(result)
-#     plt.title(title)
-#     plt.plot(lx_values, y_values, color=color)
-#     plt.plot(rx_values, y_values, color=color)
-#     plt.xlim(0, 1280)
-#     plt.ylim(720, 0)
-#
-#     plt.show()
 #
 #
 #
@@ -357,25 +390,6 @@ display_images(final, title="Final", cmap='gray')
 #     return xm - (rx + lx) / 2
 #
 #
-# def lane_mask(im, lfit, rfit):
-#     h, w, _ = im.shape
-#     y_values = np.arange(h)
-#     coeff = np.array([[y ** 2, y, 1] for y in y_values])
-#     lx_values = np.dot(lfit, coeff.T)
-#     rx_values = np.dot(rfit, coeff.T)
-#
-#     color_warp = np.zeros_like(im).astype(np.uint8)
-#
-#     # Recast the x and y points into usable format for cv2.fillPoly()
-#     pts_left = np.array([np.transpose(np.vstack([lx_values, y_values]))])
-#     pts_right = np.array([np.flipud(np.transpose(np.vstack([rx_values, y_values])))])
-#     pts = np.hstack((pts_left, pts_right))
-#
-#     # Draw the lane onto the warped blank image
-#     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-#
-#     # Warp the blank back to original image space using inverse perspective matrix (Minv)
-#     return unwarp_image(color_warp, src, dst)
 #
 #
 # def annotate_image(im):
