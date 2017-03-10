@@ -88,6 +88,10 @@ class Frame:
         self.binary = None
         self.warped = None
         self.annotated = None
+        self.debug = {}
+
+    def add_debug(self, name, value):
+        self.debug[name] = value
 
     def undistort(self, camera):
         undistorted = cv2.undistort(self.image, camera.mtx, camera.dist, None, camera.mtx)
@@ -146,7 +150,13 @@ class Frame:
         masked = cv2.addWeighted(self.image, 1, mask, ratio, 0)
         return Frame(masked)
 
-
+    def mark_lane(self, camera):
+        undistorted = self.undistort(camera)
+        thresholded = undistorted.threshold_binary()
+        warped = thresholded.warp_image()
+        fit = warped.search_for_fit()
+        mask = fit.mask().unwarp()
+        return self.apply_mask(mask.image)
 
 class Warped(Frame):
     def __init__(self, image, src, dst):
@@ -174,10 +184,9 @@ class Warped(Frame):
         out_img[lyp, lxp] = [255, 0, 0]
         out_img[ryp, rxp] = [0, 0, 255]
 
-        left_fit = np.polyfit(lyp, lxp, 2)
-        right_fit = np.polyfit(ryp, rxp, 2)
-
-        return Fit(self, out_img, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom)
+        fit =  Fit(self, lxp, lyp, rxp, ryp, left_bottom, right_bottom)
+        fit.add_debug("sliding_window_image", out_img)
+        return fit
 
     def search_around_fit(self, fit, margin=50):
         im = self.image
@@ -188,26 +197,30 @@ class Warped(Frame):
         prx = np.dot(rfit, coeff.T)
         lcond = (nzx - margin < plx) & (nzx + margin > plx)
         rcond = (nzx - margin < prx) & (nzx + margin > prx)
-        nlfit = np.polyfit(nzy[lcond], nzx[lcond], 2)
-        nrfit = np.polyfit(nzy[rcond], nzx[rcond], 2)
         lx, ly, rx, ry = nzx[lcond], nzy[lcond], nzx[rcond], nzy[rcond]
 
-        return Fit(self, None, nlfit, nrfit, lx, ly, rx, ry, [], [])
+        return Fit(self, lx, ly, rx, ry, [], [])
 
 
 class Fit(Warped):
 
-    def __init__(self, warped, slide_image, left_fit, right_fit, lxp, lyp, rxp, ryp, left_bottom, right_bottom):
+    def __init__(self, warped, lxp, lyp, rxp, ryp, left_bottom, right_bottom):
         Warped.__init__(self, warped.image, warped.src, warped.dst)
-        self.slide_image = slide_image
-        self.left_fit = left_fit
-        self.right_fit = right_fit
         self.lxp = lxp
         self.lyp = lyp
         self.rxp = rxp
         self.ryp = ryp
+        self.left_fit = np.polyfit(self.lyp, self.lxp, 2)
+        self.right_fit = np.polyfit(self.ryp, self.rxp, 2)
         self.left_bottom = left_bottom
         self.right_bottom = right_bottom
+
+    def to_real_world(self):
+        ym_per_pix = 30 / 720
+        xm_per_pix = 3.7 / 700
+        lxp, rxp = self.lxp * xm_per_pix, self.rxp * xm_per_pix
+        lyp, ryp = self.lyp * ym_per_pix, self.ryp * ym_per_pix
+        return Fit(self.image, lxp, lyp, rxp, ryp)
 
     def mask(self):
         im = np.dstack((self.image, self.image, self.image))
@@ -287,16 +300,7 @@ test_frames = [Frame(im) for im in test_images]
 # display_images(channels, title="L & S channels", col=4, cmap='gray')
 
 # Pipeline
-final = []
-for frame in test_frames:
-    undistorted = frame.undistort(camera)
-    thresh = undistorted.threshold_binary()
-    warped = thresh.warp_image()
-    fit = warped.search_for_fit()
-    mask = fit.mask().unwarp()
-    masked = frame.apply_mask(mask.image)
-    final.append(masked.image)
-
+final = [frame.mark_lane(camera).image for frame in test_frames]
 display_images(final, title="Final")
 
 
