@@ -5,10 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import cv2
 import numpy as np
-#
-# dir = "camera_cal"
-# images = [mpimg.imread(f) for f in glob.glob(os.path.join(dir, "calibration*.jpg"))]
-#
+
 def display_images(images, cmap=None, col=3, title=None):
     row = (len(images)-1)//col + 1
     gs = gridspec.GridSpec(row, col)
@@ -62,6 +59,10 @@ def slide_windows(im, out_img, slide_start, num_window, width_window, thresh=50)
         cv2.rectangle(out_img, (lowx, lowy), (highx, highy), (0, 255, 0), 2)
     return xpts, ypts
 
+
+def radius_of_curvature(fit, y):
+    a, b, c = fit
+    return ((1 + (2 * a * y + b) ** 2) ** (3 / 2)) / np.absolute(2 * a)
 
 
 class Camera:
@@ -155,8 +156,14 @@ class Frame:
         thresholded = undistorted.threshold_binary()
         warped = thresholded.warp_image()
         fit = warped.search_for_fit()
-        mask = fit.mask().unwarp()
-        return self.apply_mask(mask.image)
+        mask = fit.mask().unwarp().image
+        average_fit = fit.to_real_world().average()
+        rc = radius_of_curvature(average_fit, mask.shape[0])
+        oc = fit.to_real_world().offset_from_centre()
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(mask, "Radius of curvature : " + str(rc) + " m", (100, 50), font, 1.5, (255, 255, 255), 2)
+        cv2.putText(mask, "Offset from centre  : " + str(oc) + " m", (100, 100), font, 1.5, (255, 255, 255), 2)
+        return self.apply_mask(mask)
 
 class Warped(Frame):
     def __init__(self, image, src, dst):
@@ -220,7 +227,20 @@ class Fit(Warped):
         xm_per_pix = 3.7 / 700
         lxp, rxp = self.lxp * xm_per_pix, self.rxp * xm_per_pix
         lyp, ryp = self.lyp * ym_per_pix, self.ryp * ym_per_pix
-        return Fit(self.image, lxp, lyp, rxp, ryp)
+        return Fit(self, lxp, lyp, rxp, ryp, [], [])
+
+    def offset_from_centre(self):
+        ym_per_pix = 30 / 720
+        xm_per_pix = 3.7 / 700
+        centre_x, centre_y = self.image.shape[1]//2 * xm_per_pix, self.image.shape[0] * ym_per_pix
+        coeff = np.array([centre_y**2, centre_y, 1])
+        lp = np.dot(self.left_fit, coeff.T)
+        rp = np.dot(self.right_fit, coeff.T)
+        return centre_x - (lp + rp)/2
+
+    def average(self):
+        ave = np.average((self.left_fit, self.right_fit), axis=0, weights=(len(self.lxp), len(self.rxp)))
+        return ave
 
     def mask(self):
         im = np.dstack((self.image, self.image, self.image))
@@ -351,9 +371,6 @@ display_images(final, title="Final")
 #     return fit
 #
 #
-# def radius_of_curvature(fit, y):
-#     a, b, c = fit
-#     return ((1 + (2 * a * y + b) ** 2) ** (3 / 2)) / np.absolute(2 * a)
 #
 #
 # # im = thresh_images[2]
