@@ -122,5 +122,6 @@ Here's a [link to my video result](https://www.youtube.com/watch?v=K20I7sV3GDc)
 
 ####1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
 
+* Shadows and lighting differences posed the biggest challenges
 * The failback mechanism I used is to reuse either the last best fit or the other lane's fit. Both these techniques can fail if the car is passing through a shadowed tunnel with differing curvature
 * I could average last few fits to make a more robust solution
