@@ -169,6 +169,9 @@ class Frame:
         M = cv2.getPerspectiveTransform(src, dst)
         unsigned = np.uint8(self.image)
         warped = cv2.warpPerspective(unsigned, M, (maxx, maxy), flags=cv2.INTER_LINEAR)
+        minx, maxx = dst[0,0] - 100, dst[3,0] + 100
+        warped[:, 0:minx] = 0
+        warped[:,maxx:] = 0
         return Warped(warped, src, dst)
 
     def apply_mask(self, mask, ratio):
@@ -410,15 +413,24 @@ clip1 = VideoFileClip("project_video.mp4")
 annotated = clip1.fl_image(NewLaneFinder(camera).find_lane)
 annotated.write_videofile(video_output, audio=False)
 
+
 #Debug
-# export_images = [mpimg.imread(f) for f in glob.glob(os.path.join("exported", "frame00*.jpeg"))]
+# export_images = [mpimg.imread(f) for f in glob.glob(os.path.join("exported", "frame071*.jpeg"))]
 # export_frames = [Frame(im) for im in export_images]
 # final = []
 # for frame in export_frames[:5]:
 #
-#     im = frame.threshold_binary()
+#     im = frame.threshold_binary().image
 #     warped = frame.birds_eye_view(camera)
 #     left, right = warped.search_for_fit()
+#     # src = warped.src
+#     # cv2.line(im, tuple(src[0]), tuple(src[2]), (255,0,0), 2)
+#     # cv2.line(im, tuple(src[1]), tuple(src[3]), (255, 0, 0), 2)
+#     # im2 = np.uint8(warped.color_image())
+#     # dst = warped.dst
+#     # cv2.line(im2, tuple(dst[0]), tuple(dst[2]), (255,0,0), 2)
+#     # cv2.line(im2, tuple(dst[1]), tuple(dst[3]), (255, 0, 0), 2)
+#     #im = warped.image
 #     # im = warped.debug["sliding_window_image"]
 #     # im = warped.color_image()
 #     # im = left.draw_on(im)
@@ -426,11 +438,12 @@ annotated.write_videofile(video_output, audio=False)
 #     mask = warped.lane_mask(left, right)
 #     ann = frame.mark_lanes(mask.image, left, right)
 #
+#     #final.append(im)
 #     final.append(ann.image)
 #
 # #final = [straight_lines1.warp_image().image]
 # display_images(final, title="Final", cmap='gray')
-
+#
 
 # # Debug
 # image = mpimg.imread(os.path.join("exported", "frame0011.jpeg"))
