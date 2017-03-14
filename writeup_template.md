@@ -40,7 +40,7 @@ You're reading it!
 
 ####1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
 
-[calibrate_camera()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L74)
+[calibrate_camera()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L88)
 
 The central idea behind calibration is to provide samples of relative differences between known points captured from various perspectives and distances so that we can calibrate the distortion caused by the lenses. The known points are encapsulated in `object_points`, which is simply the known corners of a chessboard of size (9,6). The perceived points are drawn from various images by using the function `findChessboardCorners` which returns true if it is able to find the required number of corners. With the valid set of found corners (`image_points`), we submit an equivalent set of `object_points` and derive the camera matrix and distortion coefficients. Supplying these parameters to the `cv2.undistort()` allows us to "undistort" any image captured by the same camera. For eg.
 
@@ -54,7 +54,7 @@ The first step to process a driving video is to undistort each of the images
 ![alt text][undistorted_road]
 ####2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
 
-[threshold_binary()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L133)
+[threshold_binary()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L146)
 
 The steps to arrive at a binary thresholded image are:
  * Convert image to HLS color space and extract channels L and S. The S channel makes lane lanes stand out and the L channel is useful to extract the "lightedness" of short markings
@@ -72,13 +72,15 @@ The steps to arrive at a binary thresholded image are:
 
 ####3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
 
-[warp_image()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L142)
+[warp_image()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L155)
 In order to perform a perspective transform, I hardcoded the source and destination points to coincide with four points on the lane.
 
 ```python
-src = np.float32([[200, 720], [590, 450], [690, 450], [1100, 720]])
-dst = np.float32([[200, 720], [200, 0], [1080, 0], [1080, 720]])
+maxy, maxx = self.image.shape[0], self.image.shape[1]
+src = np.float32([(575, 464), (707, 464), (258, 682), (1049, 682)])
+dst = np.float32([(450, 0), (maxx - 450, 0), (450, maxy), (maxx - 450, maxy)])
 ```
+
 I tested the perspective transform on a straight line image and the lane markings appeared parallel in the warped image, as expected
 
 ![alt text][before_warp]
@@ -86,7 +88,7 @@ I tested the perspective transform on a straight line image and the lane marking
 
 ####4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
 
-[search_for_fit()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L186)
+[search_for_fit()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L207)
 
 I implemented a sliding window algorithm to detect pixels for the left and right lanes. With the detected points, I fit a 2nd degree polynomial for each of the lanes
 
@@ -95,14 +97,14 @@ I implemented a sliding window algorithm to detect pixels for the left and right
 
 ####5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
 
-[offset_from_centre()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L240)
+[offset_from_centre()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L69)
 [radius_of_curvature()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L65)
 
 For calculating the radius curvature, I averaged the left and right lane fits. The position of vehicle is basically the difference between the centre of the image and perceived centre of the lane in real-world metrics. We use the left and right fits to estimate the x-value at the bottom of the image and calculate the midpoint between these as the lane center.
 
 ####6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
-[mask()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L253)
+[lane_mask()](https://github.com/subhash/CarND-Advanced-Lane-Lines/blob/master/lane-detection.py#L238)
 
 We generate a mask by painting a polygon from the left lane to the right lane and unwarping it. This mask when superimposed on the original image represents the detected lane 
 
