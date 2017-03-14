@@ -155,17 +155,11 @@ class Frame:
     def warp_image(self):
         maxy, maxx = self.image.shape[0], self.image.shape[1]
         # src = np.float32([[190,720],[580,450],[700,450],[1170,720]])
-        src = np.float32([[200, 720], [590, 450], [690, 450], [1100, 720]])
-        #dst = np.float32([[200, 720], [200, 0], [1080, 0], [1080, 720]])
-        dst = np.float32([[400, 720], [400, 0], [900, 0], [900, 720]])
-        src = np.float32([(575, 464),
-                          (707, 464),
-                          (258, 682),
-                          (1049, 682)])
-        dst = np.float32([(450, 0),
-                          (maxx - 450, 0),
-                          (450, maxy),
-                          (maxx - 450, maxy)])
+        # src = np.float32([[200, 720], [590, 450], [690, 450], [1100, 720]])
+        # dst = np.float32([[200, 720], [200, 0], [1080, 0], [1080, 720]])
+        # dst = np.float32([[400, 720], [400, 0], [900, 0], [900, 720]])
+        src = np.float32([(575, 464), (707, 464), (258, 682), (1049, 682)])
+        dst = np.float32([(450, 0), (maxx - 450, 0), (450, maxy), (maxx - 450, maxy)])
         M = cv2.getPerspectiveTransform(src, dst)
         unsigned = np.uint8(self.image)
         warped = cv2.warpPerspective(unsigned, M, (maxx, maxy), flags=cv2.INTER_LINEAR)
@@ -185,12 +179,13 @@ class Frame:
         return warped
 
     def mark_lanes(self, mask, left, right, ratio=0.3):
-        # average_fit = np.average((left.fit, right.fit), axis=0, weights=(len(left.xp), len(right.xp)))
-        # rc = radius_of_curvature(average_fit, mask.shape[0])
-        # oc = offset_from_centre(self.image, left, right)
-        # font = cv2.FONT_HERSHEY_SIMPLEX
-        # cv2.putText(mask, "Radius of curvature : " + str(rc) + " m", (100, 50), font, 1.5, (255, 255, 255), 2)
-        # cv2.putText(mask, "Offset from centre  : " + str(oc) + " m", (100, 100), font, 1.5, (255, 255, 255), 2)
+        # ave_fit = np.average((left.fit, right.fit), axis=0)
+        print(mask.shape)
+        rc = radius_of_curvature(left.fit, mask.shape[0])
+        oc = offset_from_centre(self.image, left, right)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(mask, "Radius of curvature : " + str(rc) + " m", (100, 50), font, 1.5, (255, 255, 255), 2)
+        cv2.putText(mask, "Offset from centre  : " + str(oc) + " m", (100, 100), font, 1.5, (255, 255, 255), 2)
         return self.apply_mask(mask, ratio)
 
 class Warped(Frame):
@@ -286,11 +281,12 @@ class Line:
 
 
 class AlteredLine(Line):
-    def __init__(self, fit, bottom):
+    def __init__(self, fit, maxy, bottom):
         self.fit = fit
         self.bottom = bottom
-        self.yp = []
-        self.xp = []
+        self.yp = np.arange(maxy)
+        coeff = np.array([[y**2, y, 1] for y in self.yp])
+        self.xp = np.dot(self.fit, coeff.T)
 
 class NewLaneFinder:
     def __init__(self, camera):
@@ -332,19 +328,20 @@ class NewLaneFinder:
         # if not left: left = self.best_left
         # if not right: right = self.best_right
 
-        #self.left_lines = ([left] + self.left_lines)[:10]
-        #self.right_lines = ([right] + self.right_lines)[:10]
-        #lfit = np.average([line.fit for line in self.left_lines], axis=0)
-        #rfit = np.average([line.fit for line in self.right_lines], axis=0)
+        self.left_lines = np.append(left, self.left_lines)[:10]
+        self.right_lines = np.append(right, self.right_lines)[:10]
+        lfit = np.average([line.fit for line in self.left_lines], axis=0)
+        rfit = np.average([line.fit for line in self.right_lines], axis=0)
 
-
-        # left_ave, right_ave = AlteredLine(lfit, 0), AlteredLine(rfit, 0)
+        left_ave = AlteredLine(lfit, warped.image.shape[0], left.bottom)
+        right_ave = AlteredLine(rfit, warped.image.shape[0], right.bottom)
         # mask = warped.lane_mask(left_ave, right_ave)
         # ann = frame.mark_lanes(mask.image, left_ave, right_ave)
 
         color = (255,0,0) if left_altered or right_altered else (0,255,0)
-        mask = warped.lane_mask(left, right, color)
-        ann = frame.mark_lanes(mask.image, left, right)
+        mask = warped.lane_mask(left_ave, right_ave, color)
+        undistorted = frame.undistort(self.camera)
+        ann = undistorted.mark_lanes(mask.image, left, right)
 
         return ann.image
 
