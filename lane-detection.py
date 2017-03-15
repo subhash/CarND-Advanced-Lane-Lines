@@ -180,7 +180,6 @@ class Frame:
 
     def mark_lanes(self, mask, left, right, ratio=0.3):
         # ave_fit = np.average((left.fit, right.fit), axis=0)
-        print(mask.shape)
         rc = radius_of_curvature(left.fit, mask.shape[0])
         oc = offset_from_centre(self.image, left, right)
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -308,8 +307,8 @@ class NewLaneFinder:
             rc1, rc2 = radius_of_curvature(fit.fit, 460), radius_of_curvature(best_fit.fit, 460)
             #diff = np.abs(np.dot(bf, coeff.T) - np.dot(f, coeff.T))
             diff = np.abs(rc1 - rc2)
-            if (diff > 5000):
-                return best_fit, True
+            # if (diff > 5000):
+            #     return best_fit, True
         #else:
             #left, right = warped.search_for_fit()
             #fit = left if lane_left else right
@@ -328,20 +327,23 @@ class NewLaneFinder:
         # if not left: left = self.best_left
         # if not right: right = self.best_right
 
-        self.left_lines = np.append(left, self.left_lines)[:10]
-        self.right_lines = np.append(right, self.right_lines)[:10]
-        lfit = np.average([line.fit for line in self.left_lines], axis=0)
-        rfit = np.average([line.fit for line in self.right_lines], axis=0)
+        left_hist = np.average([line.fit for line in self.left_lines], axis=0)
+        right_hist = np.average([line.fit for line in self.right_lines], axis=0)
+
+        gamma = 0.5
+        lfit = gamma * left.fit + (1-gamma) * left_hist
+        rfit = gamma * right.fit + (1 - gamma) * right_hist
 
         left_ave = AlteredLine(lfit, warped.image.shape[0], left.bottom)
         right_ave = AlteredLine(rfit, warped.image.shape[0], right.bottom)
-        # mask = warped.lane_mask(left_ave, right_ave)
-        # ann = frame.mark_lanes(mask.image, left_ave, right_ave)
 
         color = (255,0,0) if left_altered or right_altered else (0,255,0)
         mask = warped.lane_mask(left_ave, right_ave, color)
         undistorted = frame.undistort(self.camera)
         ann = undistorted.mark_lanes(mask.image, left, right)
+
+        if not left_altered: self.left_lines = np.append(left, self.left_lines)[:5]
+        if not right_altered: self.right_lines = np.append(right, self.right_lines)[:5]
 
         return ann.image
 
