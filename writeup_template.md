@@ -20,8 +20,8 @@ The goals / steps of this project are the following:
 [distorted]: ./output_images/distorted.png "Distorted"
 [undistorted]: ./output_images/undistorted.png "Undistorted"
 [undistorted_road]: ./output_images/undistorted_road.png "Undistorted road"
-[before_warp]: ./output_images/before_warped.png "Before warping"
-[warped]: ./output_images/warped.png "After warping"
+[before_warp]: ./output_images/before_warped1.png "Before warping"
+[warped]: ./output_images/warped1.png "After warping"
 [binary_threshold]: ./output_images/binary_test_images.png "Thresholded test images"
 [sliding_window]: ./output_images/sliding-window.png "Sliding window"
 [sliding_window_fit]: ./output_images/sliding-window-fit.png "Sliding window fit"
@@ -116,7 +116,7 @@ We generate a mask by painting a polygon from the left lane to the right lane an
 
 ####1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
 
-Here's a [link to my video result](https://youtu.be/TRjsNwnnH5s)
+Here's a [link to my video result](https://youtu.be/t--4y0edN5k)
 
 ---
 
