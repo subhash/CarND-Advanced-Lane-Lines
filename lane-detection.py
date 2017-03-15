@@ -128,12 +128,12 @@ class Frame:
 
     def thresholded_color(self):
         r, g, b, h, l, s, hh, ss, vv, y, u, yv, gray = self.channels()
-        thresholded_s = threshold(s, 0.75, 1.0)
-        thresholded_l = threshold(l, 0.90, 1.0)
+        thresholded_s = threshold(s, 0.50, 1.0)
+        thresholded_l = threshold(l, 0.50, 1.0)
         thresholded_gray = threshold(gray, 0.8, 1.0)
-        #thresholded_s = threshold(s, 0.7, 1.0)
-        #thresholded_l = threshold(l, 0.5, 0.75)
-        return thresholded_s, thresholded_gray
+        thresholded_r = threshold(r, 0.9, 1.0)
+        thresholded_vv = threshold(vv, 0.9, 0.75)
+        return thresholded_s, thresholded_gray, thresholded_r, thresholded_vv
 
     def threshold_gradients(self, im):
         x_grad, y_grad, mag_grad, dir_grad = gradients(im)
@@ -144,13 +144,15 @@ class Frame:
         return x_grad, y_grad, mag_grad, dir_grad
 
     def threshold_binary(self):
-        thresh_s, thresh_l = self.thresholded_color()
+        thresh_s, thresh_l, thresh_r, thresh_vv = self.thresholded_color()
         color_combined = np.logical_or(thresh_s, thresh_l)
         x_grad, y_grad, mag_grad, dir_grad = self.threshold_gradients(color_combined)
         grad_combined = np.logical_and(x_grad, y_grad)
         dir_combined = np.logical_and(dir_grad, mag_grad)
         combined = np.logical_or(grad_combined, dir_combined)
-        return Frame(combined)
+        additional = np.logical_or(thresh_r, thresh_vv)
+        final = np.logical_or(combined, additional)
+        return Frame(final)
 
     def warp_image(self):
         maxy, maxx = self.image.shape[0], self.image.shape[1]
@@ -292,59 +294,79 @@ class NewLaneFinder:
         self.camera = camera
         self.left_lines = np.array([])
         self.right_lines = np.array([])
-        self.best_left = None
-        self.best_right = None
+        self.best_left_fit = None
+        self.best_right_fit = None
+        self.last_left = None
+        self.last_right = None
 
-    def find_fit(self, warped, best_fit, lane_left):
-        left, right = warped.search_for_fit()
-        fit = left if lane_left else right
+    def distance_between(self, left, right, y1, y2):
+        coeff1 = np.array([y1**2, y1, 1])
+        coeff2 = np.array([y2** 2, y2, 1])
+        diff1 = np.dot(left.fit, coeff1.T) - np.dot(right.fit, coeff1.T)
+        diff2 = np.dot(left.fit, coeff2.T) - np.dot(right.fit, coeff2.T)
+        return np.abs(diff1 - diff2)
 
-        if best_fit != None:
-            #fit = warped.refine_fit(best_fit)
-            predy = 460
-            coeff = np.array([predy**2, predy, 1])
-            bf, f = best_fit.fit, fit.fit
-            rc1, rc2 = radius_of_curvature(fit.fit, 460), radius_of_curvature(best_fit.fit, 460)
-            #diff = np.abs(np.dot(bf, coeff.T) - np.dot(f, coeff.T))
-            diff = np.abs(rc1 - rc2)
-            # if (diff > 5000):
-            #     return best_fit, True
-        #else:
-            #left, right = warped.search_for_fit()
-            #fit = left if lane_left else right
-        return fit, False
+    def binary(self, im):
+        im = Frame(im).threshold_binary().image
+        im = np.dstack((im, im, im)) * 255
+        return im
+
+
 
     def find_lane(self, im):
         frame = Frame(im)
         warped = frame.birds_eye_view(self.camera)
-        left, left_altered = self.find_fit(warped, self.best_left, True)
-        right, right_altered = self.find_fit(warped, self.best_right, False)
-        if not left: left = self.best_left
-        if not right: right = self.best_right
-        self.best_left = left
-        self.best_right = right
-        #left, right = warped.search_for_fit()
-        # if not left: left = self.best_left
-        # if not right: right = self.best_right
+        left, right = warped.search_for_fit()
 
-        left_hist = np.average([line.fit for line in self.left_lines], axis=0)
-        right_hist = np.average([line.fit for line in self.right_lines], axis=0)
+        left_altered = right_altered = False
+        if (self.left_lines.any() and self.right_lines.any()):
+            self.best_left_fit = np.average([line.fit for line in self.left_lines], axis=0)
+            self.best_right_fit = np.average([line.fit for line in self.right_lines], axis=0)
 
-        gamma = 0.5
-        lfit = gamma * left.fit + (1-gamma) * left_hist
-        rfit = gamma * right.fit + (1 - gamma) * right_hist
+            lfit, rfit = left.fit, right.fit
+            limit = [0.001, 1.0, 100.]
+            left_diff = np.abs(left.fit - self.last_left.fit) > limit
+            right_diff = np.abs(right.fit - self.last_right.fit) > limit
+            if (left_diff.any()):
+                lfit = self.best_left_fit
+                left_altered = True
+            if (right_diff.any()):
+                rfit = self.best_right_fit
+                right_altered = True
 
-        left_ave = AlteredLine(lfit, warped.image.shape[0], left.bottom)
-        right_ave = AlteredLine(rfit, warped.image.shape[0], right.bottom)
 
-        color = (255,0,0) if left_altered or right_altered else (0,255,0)
+            # dist = self.distance_between(left, right, 460, 700)
+            # if (dist > 20.):
+            #     left, right = self.best_left, self.best_right
+            #     left_altered = right_altered = True
+
+            gamma = 0.3
+            lfit = gamma * lfit + (1-gamma) * self.best_left_fit
+            rfit = gamma * rfit + (1-gamma) * self.best_right_fit
+
+            left_ave = AlteredLine(lfit, warped.image.shape[0], left.bottom)
+            right_ave = AlteredLine(rfit, warped.image.shape[0], right.bottom)
+        else:
+            left_ave = left
+            right_ave = right
+
+        # Maintaing history
+        if not left_altered:
+            self.left_lines = np.append(left_ave, self.left_lines)[:3]
+            self.last_left = left
+        if not right_altered:
+            self.right_lines = np.append(right_ave, self.right_lines)[:3]
+            self.last_right = right
+
+        if left_altered:
+            color = (0,0,255)
+        elif right_altered:
+            color = (255,0,0)
+        else:
+            color = (0,255,0)
         mask = warped.lane_mask(left_ave, right_ave, color)
         undistorted = frame.undistort(self.camera)
         ann = undistorted.mark_lanes(mask.image, left, right)
-
-        if not left_altered: self.left_lines = np.append(left, self.left_lines)[:5]
-        if not right_altered: self.right_lines = np.append(right, self.right_lines)[:5]
-
         return ann.image
 
 
@@ -366,8 +388,8 @@ camera = Camera(calibration_images)
 # channels = frame.channels()
 # display_images(channels, cmap='gray')
 
-# test_images = [mpimg.imread(f) for f in glob.glob(os.path.join("test_images", "test*.jpg"))]
-# test_frames = [Frame(im) for im in test_images]
+test_images = [mpimg.imread(f) for f in glob.glob(os.path.join("test_images", "test*.jpg"))]
+test_frames = [Frame(im) for im in test_images]
 
 # # Choosing channels
 # display_images(test_images, title="Test images")
@@ -377,34 +399,17 @@ camera = Camera(calibration_images)
 # Pipeline
 # final = []
 # for frame in test_frames:
-#
-#
-#     # warped = frame.birds_eye_view(camera)
-#     # left, right = warped.search_for_fit()
-#     # im = warped.debug["sliding_window_image"]
-#     # im = warped.color_image()
-#     # im = left.draw_on(im)
-#     # im = right.draw_on(im)
-#     # mask = warped.lane_mask(left, right)
-#     # ann = frame.mark_lanes(mask.image, left, right)
-#
-#     im = frame.threshold_binary()
 #     warped = frame.birds_eye_view(camera)
 #     left, right = warped.search_for_fit()
-#     before = right.draw_on(left.draw_on(warped.color_image()))
-#     left, right = warped.refine_fit(left, margin=20), warped.refine_fit(right)
-#     after = right.draw_on(left.draw_on(warped.color_image()))
-#     # im = warped.color_image()
-#     # im = left.draw_on(im)
-#     # im = right.draw_on(im)
-#     # mask = warped.lane_mask(left, right)
-#     # ann = frame.mark_lanes(mask.image, left, right)
-#
-#
-#     final.append(before)
-#     final.append(after)
+#     mask = warped.lane_mask(left, right)
+#     ann = frame.mark_lanes(mask.image, left, right)
+#     final.append(ann.image)
 #
 # display_images(final, col=2, title="Final")
+
+# finder = NewLaneFinder(camera)
+# ann = [finder.find_lane(f.image) for f in test_frames]
+# display_images(ann)
 
 # Video
 video_output = 'see.mp4'
